@@ -2288,13 +2288,15 @@ a node:
       reserve over an `update_add_htlc` or `update_fee` it receives in that
       time, or over that `commitment_signed`, if any reserves it used since
       the last `commitment_signed` it received from its peer allow it.
-    - MUST NOT close the connection or fail the channel for
-      `max_htlc_value_in_flight_msat` over an `update_add_htlc` it receives in
-      that time, if any `max_htlc_value_in_flight_msat` it used since the last
-      `commitment_signed` it received from its peer allows it.
-    - MUST remember those reserves and `max_htlc_value_in_flight_msat`, and
-      that it is still waiting for that `commitment_signed`, across
-      disconnections and restarts.
+    - MUST remember those reserves, and that it is still waiting for that
+      `commitment_signed`, across disconnections and restarts.
+    - If the `max_htlc_value_in_flight_msat` it now requires is lower than one
+      it used since the last `commitment_signed` it received from its peer
+      (which happens only after it lost its record of the lock):
+      - MUST NOT close the connection or fail the channel for
+        `max_htlc_value_in_flight_msat` over an `update_add_htlc` it receives
+        in that time, if a `max_htlc_value_in_flight_msat` it still knows it
+        used since then allows it.
   - Until the next such exchange:
     - SHOULD NOT send an update that the reserves before the change do not
       allow.
@@ -2433,10 +2435,24 @@ lost its record of the lock takes the higher value while its peer takes the
 lower one; the substituting node's rule above keeps its new HTLCs within the
 lower one, as it keeps its own updates within the reserves. The peer that lost
 its record is lenient with HTLCs that come again only as far as it still knows
-the `max_htlc_value_in_flight_msat` it used before. A node that sets the values
-as the channel loads, from its own lock state, may hold the lower one on the
-connection where the lock completes; the SHOULD NOT above covers that from the
-other side.
+the `max_htlc_value_in_flight_msat` it used before. Nothing asks a node to
+remember its caps for this, unlike the reserves: a node that keeps its records
+never needs that leniency, since its own cap only rises, and only a node that
+lost its record of the lock would, which can apply only what it still knows.
+
+The other case is a node that sets the values as the channel loads, from its
+own lock state, and completes the lock from its peer's `channel_reestablish`
+(through `my_current_funding_locked`). It still holds the lower cap for that
+connection, while its peer, whose lock was already complete, switches to the
+higher one. The SHOULD NOT above, keeping offered HTLCs within the cap the
+peer required before the change until the next exchange, covers that from the
+switching side, as the SHOULD NOT before it does for reserves.
+
+When the nodes name different RBF candidates of a splice at an exchange, the
+reserve transaction is the one both candidates spend, so neither candidate's
+`max_htlc_value_in_flight` counts: a node that raised its cap in one attempt
+keeps the value of the transaction both candidates spend until an exchange
+lands on a transaction that is or spends that attempt.
 
 `max_htlc_value_in_flight` is odd, and no feature bit is needed: a peer that
 doesn't understand it ignores it, keeps offering HTLCs within the cap from
