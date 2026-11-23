@@ -2203,6 +2203,13 @@ once a node has received its peer's `channel_reestablish`:
   - Otherwise:
     - MUST use the channel reserves set at channel opening.
   - MUST keep those reserves until the next such exchange.
+  - If it used a transaction in place of its peer's above, until the next such
+    exchange:
+    - MUST NOT close the connection or fail the channel for the channel
+      reserve over an `update_add_htlc` or `update_fee` it receives, or over a
+      `commitment_signed`, if the reserves it would have taken from its peer's
+      `my_current_funding_locked` as sent allow it, using the channel funding
+      transaction if that is missing or names an unknown transaction.
   - MUST remember the last `splice_locked` it received from its peer across
     disconnections and restarts.
 
@@ -2223,6 +2230,9 @@ Once the reserves change at an exchange, a node:
       the last `commitment_signed` it received from its peer allow it.
     - MUST remember those reserves, and that it is still waiting for that
       `commitment_signed`, across disconnections and restarts.
+  - Until the next such exchange:
+    - SHOULD NOT send an update that the reserves before the change do not
+      allow.
 
 ##### Rationale
 
@@ -2259,7 +2269,19 @@ instead. It does not close the connection: an honest node can name less than
 it has locked, after a restore from a static backup or a crash that lost its
 record of a `splice_locked` it sent, and the connection has to stay up for the
 channel to be recovered, or for the node to learn the lock again from its
-peer's `my_current_funding_locked`. A reorganization deeper than acceptable
+peer's `my_current_funding_locked`. The two then disagree on that connection:
+the node that lost its record takes the reserves its own named transaction
+gives, while its peer takes those of the substituted one. So the node that
+substitutes holds its own updates to the reserves it took, but accepts its
+peer's under those its peer's named transaction gives, until the next
+exchange, by which its peer has learned the lock again and names it itself. A
+peer that names less on purpose gains, on that connection, at most the
+difference between the two reserves, the same bound the leniency below
+concedes. The node that lost its record cannot take its peer's named
+transaction as a floor instead: it cannot tell that it lost anything, and the
+ordinary case, where it has not locked yet and its peer has, looks the same to
+it. There its peer has no `splice_locked` from it to substitute, so both land
+on the earlier transaction and agree. A reorganization deeper than acceptable
 depth, undoing a lock, is outside this: the channel's commitment transactions
 spend an output that may no longer exist. A splice ends the reserves
 negotiated in `open_channel` too: like a channel opened with `open_channel2`,
@@ -2268,7 +2290,13 @@ a spliced channel is funded by both sides.
 The reserves change only at an exchange, so after a lock they stay as they
 were until the nodes reconnect. After a splice-out the old reserves can be
 higher than a side's new balance allows, and that side can add no HTLC until
-then; the MAY above lets either node bring the exchange forward.
+then; the MAY above lets either node bring the exchange forward. A
+disconnection drops every channel with that peer, so an implementation can
+limit it to when the old reserves block an update it wants to send and nothing
+is outstanding. Switching at a commitment boundary instead, the way `update_fee`
+takes effect, would need a new message: `splice_locked` can cross in-flight
+updates in either direction, so nothing in the lock puts both nodes on the same
+commitment.
 
 An implementation that instead sets a spliced channel's reserves as the
 channel loads for a connection, from its own lock state, disagrees with this
@@ -2276,8 +2304,13 @@ rule on the connection where it completes a lock through its peer's
 `my_current_funding_locked`: it keeps the old reserves for that connection
 while its peer switches. A reserve check that fails then can fail the channel.
 Against such a node, reconnecting once both nodes have sent and received
-`splice_locked` avoids that, since from the next connection both use the new
-reserves.
+`splice_locked` limits that to the connection where the lock completes, since
+from the next connection both use the new reserves; an update can still go out
+on that connection before anyone reconnects. The SHOULD NOT above covers it
+from the other side: a node that keeps its own updates within the reserves
+before the change, until the next exchange, cannot trip a peer that still
+holds them, and its peer cannot see the difference, so this is compliant
+whichever point a peer switches at.
 
 Updates first sent before the reserves change and retransmitted after it were
 added under the reserves in force then. Checked against the new ones, a
