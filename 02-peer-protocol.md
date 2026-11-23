@@ -510,6 +510,9 @@ completed.
     2. data:
         * [`s64`:`satoshis`]
    1. type: 2 (`require_confirmed_inputs`)
+   1. type: 4073 (`max_htlc_value_in_flight`)
+   2. data:
+       * [`u64`:`max_htlc_value_in_flight_msat`]
 
 #### Requirements
 
@@ -523,12 +526,16 @@ The sender:
     - MUST set `funding_output_contribution`
   - If it requires the receiving node to only use confirmed inputs:
     - MUST set `require_confirmed_inputs`
+  - If the transaction is not a splice transaction:
+    - MUST NOT set `max_htlc_value_in_flight`.
   - If it contributed to previous transactions:
     - MUST ensure that the new transaction double-spends all other attempts,
       by sending `tx_add_input` with at least one input
       from each previous transaction construction attempt.
 
 The recipient:
+  - If the transaction is not a splice transaction:
+    - MUST ignore `max_htlc_value_in_flight`.
   - MUST respond either with `tx_abort` or with `tx_ack_rbf`
   - MUST respond with `tx_abort` if:
     - the `feerate` is not greater than or equal to the maximum of:
@@ -577,6 +584,9 @@ not contributing to the funding output.
     2. data:
         * [`s64`:`satoshis`]
    1. type: 2 (`require_confirmed_inputs`)
+   1. type: 4073 (`max_htlc_value_in_flight`)
+   2. data:
+       * [`u64`:`max_htlc_value_in_flight_msat`]
 
 #### Requirements
 
@@ -585,12 +595,16 @@ The sender:
     - MUST set `funding_output_contribution`
   - If it requires the receiving node to only use confirmed inputs:
     - MUST set `require_confirmed_inputs`
+  - If the transaction is not a splice transaction:
+    - MUST NOT set `max_htlc_value_in_flight`.
   - If it contributed to previous transactions:
     - MUST ensure that the new transaction double-spends all other attempts,
       by sending `tx_add_input` with at least one input
       from each previous transaction construction attempt.
 
 The recipient:
+  - If the transaction is not a splice transaction:
+    - MUST ignore `max_htlc_value_in_flight`.
   - MUST respond with `tx_abort` or with a `tx_add_input` message,
     restarting the interactive tx collaboration protocol.
   - MUST fail the negotiation if:
@@ -768,7 +782,10 @@ node will accept.
 `max_htlc_value_in_flight_msat` is a cap on total value of outstanding
 HTLCs offered by the remote node, which allows the local node to limit its
 exposure to HTLCs; similarly, `max_accepted_htlcs` limits the number of
-outstanding HTLCs the remote node can offer.
+outstanding HTLCs the remote node can offer. A splice can raise
+`max_htlc_value_in_flight_msat` (see
+[The `splice_init` Message](#the-splice_init-message) and
+[The `splice_locked` Message](#the-splice_locked-message)).
 
 `feerate_per_kw` indicates the initial fee rate in satoshi per 1000-weight
 (i.e. 1/4 the more normally-used 'satoshi per 1000 vbytes') that this
@@ -1731,6 +1748,9 @@ to indicate that one of the splice transactions reached acceptable depth.
 1. `tlv_stream`: `splice_init_tlvs`
 2. types:
    1. type: 2 (`require_confirmed_inputs`)
+   1. type: 4073 (`max_htlc_value_in_flight`)
+   2. data:
+       * [`u64`:`max_htlc_value_in_flight_msat`]
 
 `funding_contribution_satoshis` is the amount the sender is adding to their
 channel balance (splice-in) or removing from their channel balance (splice-out).
@@ -1759,6 +1779,16 @@ The sending node:
   - SHOULD set `require_confirmed_inputs`.
   - SHOULD use a different `funding_pubkey` than the one used for the
     previous funding transaction.
+  - MAY set `max_htlc_value_in_flight`, to raise the
+    `max_htlc_value_in_flight_msat` it requires of its peer for the channel
+    after this splice above the one that applies with the transaction this
+    splice spends as the reserve transaction (see
+    [The `splice_locked` Message](#the-splice_locked-message)); a lower value
+    has no effect.
+  - If it sets `max_htlc_value_in_flight`:
+    - SHOULD set it to the `max_htlc_value_in_flight_msat` it would require in
+      `open_channel`, `accept_channel`, `open_channel2` or `accept_channel2`
+      for a channel of the splice transaction's capacity.
 
 The receiving node:
   - If the channel is not quiescent:
@@ -1819,6 +1849,9 @@ Asking for confirmed inputs, in `splice_init` and `splice_ack` and so in the
 1. `tlv_stream`: `splice_ack_tlvs`
 2. types:
    1. type: 2 (`require_confirmed_inputs`)
+   1. type: 4073 (`max_htlc_value_in_flight`)
+   2. data:
+       * [`u64`:`max_htlc_value_in_flight_msat`]
 
 #### Requirements
 
@@ -1830,6 +1863,8 @@ The sending node:
   - If it requires the receiving node to only use confirmed inputs:
     - MUST set `require_confirmed_inputs`.
   - SHOULD set `require_confirmed_inputs`.
+  - MAY set `max_htlc_value_in_flight`, under the same requirements as in
+    `splice_init`.
 
 The receiving node:
   - If it has sent `splice_init`:
@@ -1976,7 +2011,8 @@ The sending node:
     - Uses the same feerate as the existing commitment transaction.
     - Uses the same `commitment_number` as the existing commitment transaction.
   - MUST send signatures for pending HTLCs.
-  - MUST remember the details of this splice transaction.
+  - MUST remember the details of this splice transaction, including the
+    `max_htlc_value_in_flight` each node set for it.
 
 The receiving node:
   - MUST NOT respond with `revoke_and_ack`.
@@ -2066,6 +2102,9 @@ The sending node:
   - MAY set `funding_output_contribution` to a different value than the
     `funding_contribution_satoshis` used in `splice_init` or `splice_ack`,
     or in previous RBF attempts.
+  - MAY set `max_htlc_value_in_flight`, under the same requirements as in
+    `splice_init`; if it does not, the value it set for the last successfully
+    negotiated attempt of this splice applies.
 
 The receiving node:
   - If the channel is not quiescent:
@@ -2117,6 +2156,9 @@ The sending node:
   - MAY set `funding_output_contribution` to a different value than the
     `funding_contribution_satoshis` used in `splice_init` or `splice_ack`,
     or in previous RBF attempts.
+  - MAY set `max_htlc_value_in_flight`, under the same requirements as in
+    `splice_init`; if it does not, the value it set for the last successfully
+    negotiated attempt of this splice applies.
 
 The receiving node:
   - If `funding_output_contribution` is negative and its absolute value is
@@ -2203,8 +2245,20 @@ once a node has received its peer's `channel_reestablish`:
   - Otherwise:
     - MUST use the channel reserves set at channel opening.
   - MUST keep those reserves until the next such exchange.
+  - MUST use as each node's `max_htlc_value_in_flight_msat` the greatest of
+    the `max_htlc_value_in_flight_msat` it set at channel opening and every
+    `max_htlc_value_in_flight` it set for the reserve transaction or for a
+    splice transaction that the reserve transaction spends, directly or
+    through other splice transactions, and keep it until the next such
+    exchange.
   - If it used a transaction in place of its peer's above, until the next such
     exchange:
+    - MUST NOT offer an HTLC that would bring the total value of its offered
+      HTLCs above the `max_htlc_value_in_flight_msat` it would have taken for
+      its peer from its peer's `my_current_funding_locked` as sent, using the
+      channel funding transaction if that is missing or names an unknown
+      transaction, other than one it first sent before the exchange and is
+      sending again with a `commitment_signed` it has to send again.
     - MUST NOT close the connection or fail the channel for the channel
       reserve over an `update_add_htlc` or `update_fee` it receives, or over a
       `commitment_signed`, if the reserves it would have taken from its peer's
@@ -2213,14 +2267,20 @@ once a node has received its peer's `channel_reestablish`:
   - MUST remember the last `splice_locked` it received from its peer across
     disconnections and restarts.
 
-Until its first such exchange, a channel uses the channel reserves set at
-channel opening. Once a node has sent and received `splice_locked`, it MAY
-disconnect and reconnect so that the new reserves take effect.
+Until its first such exchange, a channel uses the channel reserves and the
+`max_htlc_value_in_flight_msat` set at channel opening. Once a node has sent
+and received `splice_locked`, it MAY disconnect and reconnect so that the new
+reserves and `max_htlc_value_in_flight_msat` take effect.
 
-Once the reserves change at an exchange, a node:
-  - MUST NOT send an update the new reserves do not allow, other than one it
-    first sent before the change and is sending again with a
-    `commitment_signed` it has to send again.
+Once its peer's `max_htlc_value_in_flight_msat` rises at an exchange, a node
+that limited the `htlc_maximum_msat` of its `channel_update` to the previous
+value SHOULD send a new `channel_update`.
+
+Once the reserves or a `max_htlc_value_in_flight_msat` change at an exchange,
+a node:
+  - MUST NOT send an update the new reserves or `max_htlc_value_in_flight_msat`
+    do not allow, other than one it first sent before the change and is
+    sending again with a `commitment_signed` it has to send again.
   - Until it receives the first `commitment_signed` from its peer after the
     change, on that connection or a later one, and the rest of its batch if
     splice transactions are pending:
@@ -2228,11 +2288,19 @@ Once the reserves change at an exchange, a node:
       reserve over an `update_add_htlc` or `update_fee` it receives in that
       time, or over that `commitment_signed`, if any reserves it used since
       the last `commitment_signed` it received from its peer allow it.
-    - MUST remember those reserves, and that it is still waiting for that
-      `commitment_signed`, across disconnections and restarts.
+    - MUST NOT close the connection or fail the channel for
+      `max_htlc_value_in_flight_msat` over an `update_add_htlc` it receives in
+      that time, if any `max_htlc_value_in_flight_msat` it used since the last
+      `commitment_signed` it received from its peer allows it.
+    - MUST remember those reserves and `max_htlc_value_in_flight_msat`, and
+      that it is still waiting for that `commitment_signed`, across
+      disconnections and restarts.
   - Until the next such exchange:
     - SHOULD NOT send an update that the reserves before the change do not
       allow.
+    - SHOULD NOT offer an HTLC that would bring the total value of its offered
+      HTLCs above the `max_htlc_value_in_flight_msat` its peer required before
+      the change.
 
 ##### Rationale
 
@@ -2292,11 +2360,11 @@ were until the nodes reconnect. After a splice-out the old reserves can be
 higher than a side's new balance allows, and that side can add no HTLC until
 then; the MAY above lets either node bring the exchange forward. A
 disconnection drops every channel with that peer, so an implementation can
-limit it to when the old reserves block an update it wants to send and nothing
-is outstanding. Switching at a commitment boundary instead, the way `update_fee`
-takes effect, would need a new message: `splice_locked` can cross in-flight
-updates in either direction, so nothing in the lock puts both nodes on the same
-commitment.
+limit it to when the old reserves or the old `max_htlc_value_in_flight_msat`
+block an update it wants to send and nothing is outstanding. Switching at a
+commitment boundary instead, the way `update_fee` takes effect, would need a
+new message: `splice_locked` can cross in-flight updates in either direction,
+so nothing in the lock puts both nodes on the same commitment.
 
 An implementation that instead sets a spliced channel's reserves as the
 channel loads for a connection, from its own lock state, disagrees with this
@@ -2335,6 +2403,46 @@ leniency covers both. A sender that breaks the rule above can, in that window,
 take its balance down to the old reserve rather than the new one, where the
 old one is the lower (as after a splice-in): by at most the difference between
 the two. Every later update is held to the new reserves.
+
+Some implementations derive `max_htlc_value_in_flight_msat` from the channel
+capacity at opening (one requires 99% of it), and without
+`max_htlc_value_in_flight` nothing changes it afterwards: a channel opened with
+1,000,000 satoshis and spliced to 2,000,000 satoshis still refuses HTLCs above
+990,000 satoshis in flight at once, however large the balance, and a
+multi-part payment cannot get around it inside that channel. Implementations
+may also cap `htlc_maximum_msat` by it, so the channel looks no larger to the
+network than it was at opening.
+
+The cap protects the node that sets it, by bounding its HTLC exposure, so
+raising its own is that node's decision alone, and its peer only has to learn
+the new value. The capacity changes only in a splice, which both nodes agree on
+in `splice_init` and `splice_ack`, so the value rides there and takes effect at
+the same exchange as the reserves, from the same transaction. Taking the
+greatest value set for that transaction and the splice transactions it spends
+makes it rise and never fall, whichever splices the exchanges land on: a node
+can negotiate a second splice before the first one's values take effect, and a
+lower value there must not bring the cap down. Lowering the cap could reuse the
+reserve leniency, but is not needed here and is left out for simplicity; a node
+that wants a lower cap can close the channel and open a new one.
+
+For a node that keeps its records, the cap only rises, so a node still using
+the older, lower value offers less than it may and cannot trip its peer. A
+sender could take the higher value while its peer holds the lower one in two
+cases. A node that substitutes its peer's last `splice_locked` for a peer that
+lost its record of the lock takes the higher value while its peer takes the
+lower one; the substituting node's rule above keeps its new HTLCs within the
+lower one, as it keeps its own updates within the reserves. The peer that lost
+its record is lenient with HTLCs that come again only as far as it still knows
+the `max_htlc_value_in_flight_msat` it used before. A node that sets the values
+as the channel loads, from its own lock state, may hold the lower one on the
+connection where the lock completes; the SHOULD NOT above covers that from the
+other side.
+
+`max_htlc_value_in_flight` is odd, and no feature bit is needed: a peer that
+doesn't understand it ignores it, keeps offering HTLCs within the cap from
+channel opening, and the node that raised its cap accepts those as before.
+`max_accepted_htlcs` and `htlc_minimum_msat` don't depend on the capacity, so a
+splice has no reason to change them.
 
 ## Channel Close
 
@@ -3119,7 +3227,8 @@ A sending node:
   `max_accepted_htlcs` HTLCs, in the remote commitment transaction:
     - MUST NOT add an HTLC.
   - if the total value of offered HTLCs would exceed the remote's
-`max_htlc_value_in_flight_msat`:
+`max_htlc_value_in_flight_msat` in force (see
+[The `splice_locked` Message](#the-splice_locked-message)):
     - MUST NOT add an HTLC.
   - for the first HTLC it offers:
     - MUST set `id` to 0.
@@ -3140,7 +3249,7 @@ A receiving node:
     - SHOULD send a `warning` and close the connection, or send an
       `error` and fail the channel.
   - if a sending node adds more than receiver `max_accepted_htlcs` HTLCs to
-    its local commitment transaction, OR adds more than receiver `max_htlc_value_in_flight_msat` worth of offered HTLCs to its local commitment transaction:
+    its local commitment transaction, OR adds more than receiver `max_htlc_value_in_flight_msat` in force (see [The `splice_locked` Message](#the-splice_locked-message)) worth of offered HTLCs to its local commitment transaction:
     - SHOULD send a `warning` and close the connection, or send an
       `error` and fail the channel.
   - if sending node sets `cltv_expiry` to greater or equal to 500000000:
